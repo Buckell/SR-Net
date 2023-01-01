@@ -55,7 +55,10 @@ namespace sr {
     enum class type : uint8_t {
         none = 0,
         integer = 1,
-        string = 2
+        string = 2,
+        floating = 3,
+        boolean = 4,
+        bytes = 5
     };
 
     namespace client { class net; }
@@ -76,6 +79,10 @@ namespace sr {
         std::vector<std::string_view> m_no_send_ids;
 
     public:
+        using integer = size_t;
+        using floating = double;
+        using boolean = bool;
+
         void clear_message_ids() {
             m_message_ids.clear();
             m_message_id_map.clear();
@@ -99,6 +106,18 @@ namespace sr {
             if (a_no_send) {
                 m_no_send_ids.push_back(str);
             }
+        }
+
+        [[nodiscard]] size_t network_string_to_id(std::string_view a_string) {
+            return m_message_id_map[a_string];
+        }
+
+        [[nodiscard]] std::string_view id_to_network_string(size_t a_string) {
+            auto it = std::find_if(m_message_id_map.begin(), m_message_id_map.end(), [a_string](auto& entry) {
+                return entry.second == a_string;
+            });
+
+            return it->second;
         }
 
         void receive(std::string_view a_id, std::function<void (t_dispatch_args&&...)> a_callback) {
@@ -125,23 +144,57 @@ namespace sr {
             write_to_buffer(id_it->second);
         }
 
-        void write_int(size_t a_int) {
+        [[nodiscard]] bool is_space_available(size_t a_size) const noexcept {
+            return a_size + m_buffer_index < m_buffer.size();
+        }
+
+        template <typename t_type>
+        [[nodiscard]] bool is_space_available() const noexcept {
+            return is_space_available(sizeof(t_type));
+        }
+
+        [[nodiscard]] bool is_next(type a_type) const noexcept {
+            return is_space_available<type>() && peek_from_buffer<type>() == a_type;
+        }
+
+        // INTEGER
+
+        void write_int(integer a_int) {
             write_to_buffer(type::integer);
             write_to_buffer(a_int);
         }
 
+        [[nodiscard]] size_t read_int() {
+            check_next_type(type::integer);
+            return read_from_buffer<integer>();
+        }
+
+        [[nodiscard]] size_t peek_int() {
+            peek_check_next_type(type::integer);
+            m_buffer_index += sizeof(type);
+            integer value;
+            peek_from_buffer(value);
+            m_buffer_index -= sizeof(type);
+            return value;
+        }
+
+        void null_read_int() noexcept {
+            m_buffer_index += sizeof(type) + sizeof(integer);
+        }
+
+        [[nodiscard]] bool is_next_int() const noexcept {
+            return is_next(type::integer);
+        }
+
+        // STRING
+
         void write_string(std::string_view a_string) {
             write_to_buffer(type::string);
-            write_to_buffer(a_string.size());
+            write_to_buffer<size_t>(a_string.size());
             write_to_buffer(a_string.data(), a_string.size());
         }
 
-        size_t read_int() {
-            check_next_type(type::integer);
-            return read_from_buffer<size_t>();
-        }
-
-        std::string read_string() {
+        [[nodiscard]] std::string read_string() {
             check_next_type(type::string);
 
             auto string_size = read_from_buffer<size_t>();
@@ -151,6 +204,154 @@ namespace sr {
             read_from_buffer(string.data(), string_size);
 
             return string;
+        }
+
+        [[nodiscard]] std::string peek_string() {
+            peek_check_next_type(type::string);
+
+            m_buffer_index += sizeof(type);
+
+            auto string_size = peek_from_buffer<size_t>();
+
+            m_buffer_index += sizeof(size_t);
+
+            std::string string;
+            string.resize(string_size);
+            peek_from_buffer(string.data(), string_size);
+
+            m_buffer_index -= sizeof(size_t) + sizeof(type);
+
+            return string;
+        }
+
+        void null_read_string() {
+            m_buffer_index += sizeof(type);
+            auto string_size = read_from_buffer<size_t>();
+            m_buffer_index += string_size;
+        }
+
+        [[nodiscard]] bool is_next_string() const noexcept {
+            return is_next(type::string);
+        }
+
+        // FLOAT
+
+        void write_float(floating a_float) {
+            write_to_buffer(type::floating);
+            write_to_buffer(a_float);
+        }
+
+        [[nodiscard]] floating read_float() {
+            check_next_type(type::floating);
+            return read_from_buffer<floating>();
+        }
+
+        [[nodiscard]] floating peek_float() {
+            peek_check_next_type(type::floating);
+            m_buffer_index += sizeof(type);
+            floating value;
+            peek_from_buffer(value);
+            m_buffer_index -= sizeof(type);
+            return value;
+        }
+
+        void null_read_float() noexcept {
+            m_buffer_index += sizeof(type) + sizeof(floating);
+        }
+
+        [[nodiscard]] bool is_next_float() const noexcept {
+            return is_next(type::floating);
+        }
+
+        // BOOLEAN
+
+        void write_bool(boolean a_bool) {
+            write_to_buffer(type::boolean);
+            write_to_buffer(a_bool);
+        }
+
+        [[nodiscard]] boolean read_bool() {
+            check_next_type(type::boolean);
+            return read_from_buffer<boolean>();
+        }
+
+        [[nodiscard]] boolean peek_bool() {
+            peek_check_next_type(type::boolean);
+            m_buffer_index += sizeof(type);
+            boolean value;
+            peek_from_buffer(value);
+            m_buffer_index -= sizeof(type);
+            return value;
+        }
+
+        void null_read_bool() noexcept {
+            m_buffer_index += sizeof(type) + sizeof(boolean);
+        }
+
+        [[nodiscard]] bool is_next_bool() const noexcept {
+            return is_next(type::boolean);
+        }
+
+        // BYTES
+
+        void write_bytes(const std::vector<uint8_t>& a_bytes) {
+            write_to_buffer(type::bytes);
+            write_to_buffer<size_t>(a_bytes.size());
+            write_to_buffer(a_bytes.data(), a_bytes.size());
+        }
+
+        template <size_t v_size>
+        void write_bytes(const std::array<uint8_t, v_size>& a_bytes) {
+            write_to_buffer(type::bytes);
+            write_to_buffer<size_t>(a_bytes.size());
+            write_to_buffer(a_bytes.data(), a_bytes.size());
+        }
+
+        template <typename t_type>
+        void write_bytes(const t_type* a_bytes, size_t a_size) {
+            write_to_buffer(type::bytes);
+            write_to_buffer<size_t>(a_size);
+            write_to_buffer(a_bytes, a_size);
+        }
+
+        [[nodiscard]] std::vector<uint8_t> read_bytes() {
+            check_next_type(type::bytes);
+
+            auto bytes_size = read_from_buffer<size_t>();
+
+            std::vector<uint8_t> bytes;
+            bytes.resize(bytes_size);
+            read_from_buffer(bytes.data(), bytes_size);
+
+            return bytes;
+        }
+
+        [[nodiscard]] std::vector<uint8_t> peek_bytes() {
+            peek_check_next_type(type::bytes);
+
+            m_buffer_index += sizeof(type);
+
+            auto bytes_size = peek_from_buffer<size_t>();
+
+            m_buffer_index += sizeof(size_t);
+
+            std::vector<uint8_t> bytes;
+            bytes.resize(bytes_size);
+            peek_from_buffer(bytes.data(), bytes_size);
+
+            m_buffer_index -= sizeof(size_t) + sizeof(type);
+
+            return bytes;
+        }
+
+        void null_read_bytes() {
+            m_buffer_index += sizeof(type);
+            auto bytes_size = read_from_buffer<size_t>();
+            m_buffer_index += bytes_size;
+        }
+
+        [[nodiscard]] bool is_next_bytes() const noexcept {
+            return is_next(type::bytes);
         }
 
         /// Compile a schema message in the buffer containing all of the message IDs.
@@ -189,13 +390,19 @@ namespace sr {
             }
         }
 
+        void peek_check_next_type(type a_type) const {
+            if (peek_from_buffer<type>() != a_type) {
+                throw std::invalid_argument("type of next element does not match requested type");
+            }
+        }
+
         template <typename t_type>
         void write_to_buffer(const t_type& a_value) {
-            static constexpr size_t value_size = sizeof(t_type);
-
-            if (value_size + m_buffer_index >= m_buffer.size()) {
+            if (!is_space_available<t_type>()) {
                 throw std::out_of_range("overflowed buffer storage");
             }
+
+            static constexpr size_t value_size = sizeof(t_type);
 
             std::memcpy(m_buffer.data() + m_buffer_index, &a_value, value_size);
 
@@ -203,8 +410,8 @@ namespace sr {
         }
 
         template <typename t_type>
-        void write_to_buffer(t_type* a_data, size_t a_size) {
-            if (a_size + m_buffer_index >= m_buffer.size()) {
+        void write_to_buffer(const t_type* a_data, size_t a_size) {
+            if (!is_space_available<t_type>()) {
                 throw std::out_of_range("overflowed buffer storage");
             }
 
@@ -215,11 +422,11 @@ namespace sr {
 
         template <typename t_type>
         void read_from_buffer(t_type& a_value) {
-            static constexpr size_t value_size = sizeof(t_type);
-
-            if (value_size + m_buffer_index >= m_buffer.size()) {
+            if (!is_space_available<t_type>()) {
                 throw std::out_of_range("overflowed buffer storage");
             }
+
+            static constexpr size_t value_size = sizeof(t_type);
 
             std::memcpy(reinterpret_cast<void*>(&a_value), m_buffer.data() + m_buffer_index, value_size);
 
@@ -227,8 +434,19 @@ namespace sr {
         }
 
         template <typename t_type>
+        void peek_from_buffer(t_type& a_value) const {
+            if (!is_space_available<t_type>()) {
+                throw std::out_of_range("overflowed buffer storage");
+            }
+
+            static constexpr size_t value_size = sizeof(t_type);
+
+            std::memcpy(reinterpret_cast<void*>(&a_value), m_buffer.data() + m_buffer_index, value_size);
+        }
+
+        template <typename t_type>
         void read_from_buffer(t_type* a_data, size_t a_size) {
-            if (a_size + m_buffer_index >= m_buffer.size()) {
+            if (!is_space_available<t_type>()) {
                 throw std::out_of_range("overflowed buffer storage");
             }
 
@@ -238,9 +456,25 @@ namespace sr {
         }
 
         template <typename t_type>
-        t_type read_from_buffer() {
+        void peek_from_buffer(t_type* a_data, size_t a_size) const {
+            if (!is_space_available<t_type>()) {
+                throw std::out_of_range("overflowed buffer storage");
+            }
+
+            std::memcpy(reinterpret_cast<void*>(a_data), m_buffer.data() + m_buffer_index, a_size);
+        }
+
+        template <typename t_type>
+        [[nodiscard]] t_type read_from_buffer() {
             t_type value;
             read_from_buffer(value);
+            return value;
+        }
+
+        template <typename t_type>
+        [[nodiscard]] t_type peek_from_buffer() const {
+            t_type value;
+            peek_from_buffer(value);
             return value;
         }
     };

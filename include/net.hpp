@@ -58,7 +58,15 @@ namespace sr {
         string = 2,
         floating = 3,
         boolean = 4,
-        bytes = 5
+        bytes = 5,
+        serializable = 6
+    };
+
+    struct serializable {
+        [[nodiscard]] virtual size_t serialization_id() const noexcept = 0;
+        [[nodiscard]] virtual size_t serialization_size() const noexcept = 0;
+        virtual void serialize(void* a_data) const = 0;
+        virtual void deserialize(void* a_data, size_t a_size) = 0;
     };
 
     namespace client { class net; }
@@ -352,6 +360,67 @@ namespace sr {
 
         [[nodiscard]] bool is_next_bytes() const noexcept {
             return is_next(type::bytes);
+        }
+
+        // SERIALIZABLE
+
+        void write(const serializable& a_object) {
+            write_to_buffer(type::serializable);
+            write_to_buffer(a_object.serialization_id());
+
+            size_t size = a_object.serialization_size();
+            write_to_buffer<size_t>(size);
+
+            if (!is_space_available(size)) {
+                throw std::out_of_range("overflowed buffer storage");
+            }
+
+            a_object.serialize(reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(m_buffer.data()) + m_buffer_index));
+
+            m_buffer_index += size;
+        }
+
+        void read(serializable& a_object) {
+            check_next_type(type::serializable);
+
+            auto id = a_object.serialization_id();
+            if (read_from_buffer<decltype(id)>() != id) {
+                throw std::invalid_argument("Mismatched serializable object.");
+            }
+
+            auto serializable_size = read_from_buffer<size_t>();
+
+            a_object.deserialize(reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(m_buffer.data()) + m_buffer_index), serializable_size);
+
+            m_buffer_index += serializable_size;
+        }
+
+        void peek(serializable& a_object) {
+            peek_check_next_type(type::serializable);
+
+            m_buffer_index += sizeof(type);
+
+            auto id = a_object.serialization_id();
+            if (peek_from_buffer<decltype(id)>() != id) {
+                throw std::invalid_argument("Mismatched serializable object.");
+            }
+
+            m_buffer_index += sizeof(id);
+
+            auto serializable_size = peek_from_buffer<size_t>();
+
+            a_object.deserialize(reinterpret_cast<void*>(reinterpret_cast<uint8_t*>(m_buffer.data()) + m_buffer_index), serializable_size);
+
+            m_buffer_index -= sizeof(type) + sizeof(id);
+        }
+
+        void null_read_serializable() {
+            m_buffer_index += sizeof(type) + sizeof(size_t);
+            m_buffer_index += read_from_buffer<size_t>();
+        }
+
+        [[nodiscard]] bool is_next_serializable() const noexcept {
+            return is_next(type::serializable);
         }
 
         /// Compile a schema message in the buffer containing all of the message IDs.

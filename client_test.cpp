@@ -1,4 +1,5 @@
 #include <net.hpp>
+#include "test_serial.hpp"
 
 int main() {
     sr::client::net net;
@@ -15,11 +16,26 @@ int main() {
     });
 
     net.receive("TestClientMessage", [&net](){
-        auto a1 = net.read_int();
-        auto a2 = net.read_string();
-        auto a3 = net.read_int();
+        std::cout << net.read_int() << std::endl;
+        std::cout << net.is_next_string() << std::endl;
+        std::cout << net.peek_string() << std::endl;
+        std::cout << net.read_string() << std::endl;
+        std::cout << net.read_bool() << std::endl;
+        std::cout << net.read_bool() << std::endl;
+        net.null_read_int();
+        net.null_read_string();
+        std::cout << net.read_int() << std::endl;
+        std::cout << net.read_float() << std::endl;
+        auto bytes = net.read_bytes();
+        std::for_each(bytes.begin(), bytes.end(), [](auto b) {
+            std::cout << std::hex << (size_t)b << ' ';
+        });
 
-        std::cout << a1 << a2 << a3 << std::endl;
+        std::cout << std::endl << std::dec;
+
+        test_serial dd(1, 2, 3);
+        net.read(dd);
+        dd.print();
     });
 
     net.start_sync();

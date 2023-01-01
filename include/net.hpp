@@ -264,7 +264,7 @@ namespace sr {
             bool m_connected = false;
 
             std::thread m_thread;
-            std::atomic_bool m_running = false;
+            bool m_running = false;
 
         public:
             explicit net() : m_context(), m_resolver(m_context), m_socket(m_context) {
@@ -324,6 +324,7 @@ namespace sr {
             }
 
             void start_sync() {
+                m_running = true;
                 run();
             }
 
@@ -356,7 +357,9 @@ namespace sr {
             }
 
             void run() {
-                m_context.run();
+                while (m_running) {
+                    m_context.poll_one();
+                }
             }
         };
     }
@@ -393,8 +396,8 @@ namespace sr {
             io_context m_context;
             std::unique_ptr<acceptor> m_acceptor;
 
-            std::thread m_thread;       ///< Thead to manage incoming connections and messages.
-            std::atomic_bool m_running; ///< Control boolean for thread.
+            std::thread m_thread; ///< Thead to manage incoming connections and messages.
+            bool m_running;       ///< Control boolean for thread.
 
             std::vector<std::unique_ptr<client>> m_clients; ///< List of all connected clients.
             std::mutex m_clients_guard;                     ///< Guard to synchronize changes to client list.
@@ -439,6 +442,7 @@ namespace sr {
             }
 
             void start_sync() {
+                m_running = true;
                 run();
             }
 
@@ -506,7 +510,9 @@ namespace sr {
             }
 
             void run() {
-                m_context.run();
+                while (m_running) {
+                    m_context.poll_one();
+                }
             }
         };
     }
